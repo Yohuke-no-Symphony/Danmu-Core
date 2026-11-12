@@ -1,4 +1,16 @@
-# Yohuke Danmu Core
+<p align="center">
+  <img src="Sources/Yohuke.DanmuCore/Assets/favicon.png" width="112" alt="Yohuke Danmu Core icon" />
+</p>
+
+<h1 align="center">Yohuke Danmu Core</h1>
+
+<p align="center">The shared Bilibili foundation for Danmu Neo and Danmu Panel</p>
+
+<p align="center">
+  <a href="#build-and-test">Build &amp; Test</a> ·
+  <a href="#consume-from-the-applications">Integration</a> ·
+  <a href="#license">License</a>
+</p>
 
 Shared Bilibili HTTP APIs, login credentials, live protocols, account sessions, room search and history reconciliation for Danmu Panel and Danmu Neo.
 
