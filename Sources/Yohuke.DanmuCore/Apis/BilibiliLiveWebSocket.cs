@@ -19,7 +19,7 @@ namespace Yohuke.DanmuCore.Apis;
 /// <summary>
 /// B 站直播弹幕 WebSocket 客户端。
 /// </summary>
-public class BilibiliLiveWebSocket : BaseApi, ILiveDanmuSocket
+public class BilibiliLiveWebSocket : BaseApi, ILiveDanmuSocket, IBilibiliRawEventSource
 {
     private const int HEARTBEAT_INTERVAL_SECONDS = 30;
     private const int CONNECTION_MONITOR_INTERVAL_SECONDS = 5;
@@ -45,6 +45,9 @@ public class BilibiliLiveWebSocket : BaseApi, ILiveDanmuSocket
     /// 接收到翻译弹幕时触发。
     /// </summary>
     public event EventHandler<BilibiliTranslatedDanmuMessage>? TranslatedDanmuReceived;
+
+    /// <summary>原有连接解码后的原始业务事件旁路。</summary>
+    public event EventHandler<BilibiliRawBusinessEvent>? RawBusinessEventReceived;
 
     /// <summary>
     /// 接收到普通弹幕时触发。
@@ -355,11 +358,31 @@ public class BilibiliLiveWebSocket : BaseApi, ILiveDanmuSocket
                 throw new InvalidDataException("Message command is missing or invalid.");
             }
             command = json.Value<string>("cmd")!;
+            PublishRawBusinessEvent(new(roomId, command, Encoding.UTF8.GetString(body), DateTimeOffset.UtcNow));
             AnalyseBusinessMessage(json, command);
         }
         catch (Exception error) when (IsProtocolError(error))
         {
             ReportProtocolError(command, error);
+        }
+    }
+
+    private void PublishRawBusinessEvent(BilibiliRawBusinessEvent value)
+    {
+        if (RawBusinessEventReceived is not { } observers)
+        {
+            return;
+        }
+        foreach (EventHandler<BilibiliRawBusinessEvent> observer in observers.GetInvocationList())
+        {
+            try
+            {
+                observer(this, value);
+            }
+            catch (Exception exception)
+            {
+                ErrorReceived?.Invoke(this, new InvalidOperationException("原始业务事件订阅者失败。", exception));
+            }
         }
     }
 
@@ -466,6 +489,7 @@ public class BilibiliLiveWebSocket : BaseApi, ILiveDanmuSocket
             RoomId = roomId,
             MessageId = ReadScalarText(json["msg_id"] ?? json["id"] ?? danmuExtra?["id_str"]),
             Timestamp = ReadServerTimestamp(ReadArrayItem(metadata, 4), json["send_time"]),
+            TimestampMilliseconds = ReadServerTimestampMilliseconds(ReadArrayItem(metadata, 4), json["send_time"]),
             Uid = modernUid > 0 ? modernUid : ReadInteger(ReadArrayItem(legacyUser, 0)),
             UserName = string.IsNullOrWhiteSpace(modernName)
                 ? ReadScalarText(ReadArrayItem(legacyUser, 1))
@@ -708,6 +732,19 @@ public class BilibiliLiveWebSocket : BaseApi, ILiveDanmuSocket
     private static bool ReadBoolean(JToken? token)
     {
         return token?.Type == JTokenType.Boolean ? token.Value<bool>() : ReadInteger(token) > 0;
+    }
+
+    private static long ReadServerTimestampMilliseconds(params JToken?[] candidates)
+    {
+        foreach (var candidate in candidates)
+        {
+            var value = ReadInteger(candidate);
+            if (value is > MAX_UNIX_TIMESTAMP_SECONDS and <= MAX_UNIX_TIMESTAMP_SECONDS * 1000 + 999)
+            {
+                return value;
+            }
+        }
+        return 0;
     }
 
     private static long ReadServerTimestamp(params JToken?[] candidates)

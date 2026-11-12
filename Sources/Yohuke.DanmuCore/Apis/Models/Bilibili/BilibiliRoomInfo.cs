@@ -62,6 +62,18 @@ public class BilibiliRoomInfo
     [JsonProperty("online")]
     public long Online { get; set; }
 
+    /// <summary>当前直播封面地址。</summary>
+    [JsonProperty("cover")]
+    public string? CoverUrl { get; set; }
+
+    /// <summary>主播设置的直播封面地址。</summary>
+    [JsonProperty("user_cover")]
+    public string? UserCoverUrl { get; set; }
+
+    /// <summary>本次开播的 Unix 秒时间戳。</summary>
+    [JsonProperty("live_start_time")]
+    public long LiveStartTime { get; set; }
+
     /// <summary>
     /// 未显式映射的字段。
     /// </summary>

@@ -41,6 +41,7 @@ public sealed class BilibiliDanmuHistoryService(HttpClient? httpClient = null) :
         var reply = item.Reply as JObject;
         var medalGuardLevel = ReadNonNegativeInt(medal?["guard_level"]);
         var timestamp = item.Timestamp;
+        var timestampMilliseconds = timestamp is > 253402300799 and <= 253402300799999 ? timestamp : 0;
         if (timestamp > 253402300799)
         {
             timestamp /= 1000;
@@ -49,8 +50,9 @@ public sealed class BilibiliDanmuHistoryService(HttpClient? httpClient = null) :
         if (timestamp <= 0 && DateTime.TryParse(item.Timeline, CultureInfo.InvariantCulture,
                 DateTimeStyles.None, out var time))
         {
-            timestamp = new DateTimeOffset(DateTime.SpecifyKind(time, DateTimeKind.Unspecified), TimeSpan.FromHours(8))
-                .ToUnixTimeSeconds();
+            var parsedTime = new DateTimeOffset(DateTime.SpecifyKind(time, DateTimeKind.Unspecified), TimeSpan.FromHours(8));
+            timestamp = parsedTime.ToUnixTimeSeconds();
+            timestampMilliseconds = time.Ticks % TimeSpan.TicksPerSecond != 0 ? parsedTime.ToUnixTimeMilliseconds() : 0;
         }
 
         var result = new BilibiliDanmuMessage
@@ -58,6 +60,7 @@ public sealed class BilibiliDanmuHistoryService(HttpClient? httpClient = null) :
             RoomId = roomId,
             MessageId = item.MessageId ?? "",
             Timestamp = timestamp is > 0 and <= 253402300799 ? timestamp : 0,
+            TimestampMilliseconds = timestampMilliseconds,
             Uid = item.Uid,
             UserName = item.Nickname ?? "",
             Content = item.Text ?? "",

@@ -84,6 +84,10 @@ public sealed class DanmuHistoryReconciler
             return first.MessageId == second.MessageId;
         }
 
+        if (first.TimestampMilliseconds > 0 && second.TimestampMilliseconds > 0 && first.TimestampMilliseconds != second.TimestampMilliseconds)
+        {
+            return false;
+        }
         return first.Timestamp > 0 && second.Timestamp == first.Timestamp && first.Uid > 0 &&
                first.Uid == second.Uid && first.Content == second.Content;
     }

@@ -11,6 +11,9 @@ public class BilibiliDanmuMessage
     /// <summary>服务器事件时间的 Unix 秒；协议未提供时为 0。</summary>
     public long Timestamp { get; set; }
 
+    /// <summary>服务器原始毫秒时间；未提供毫秒精度时为 0，旧 Timestamp 仍为 Unix 秒。</summary>
+    public long TimestampMilliseconds { get; set; }
+
     /// <summary>
     /// 直播间 ID。
     /// </summary>
