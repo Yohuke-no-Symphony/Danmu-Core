@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <RootNamespace>Yohuke.DanmuCore</RootNamespace>
+    </PropertyGroup>
+    <ItemGroup>
+        <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+        <PackageReference Include="Google.Protobuf" Version="3.36.2" />
+        <PackageReference Include="Grpc.Tools" Version="2.85.0" PrivateAssets="all" />
+    </ItemGroup>
+    <ItemGroup>
+        <Protobuf Include="Apis/Protocols/Bilibili/*.proto" ProtoRoot="Apis/Protocols/Bilibili" GrpcServices="None" Access="Internal" />
+        <InternalsVisibleTo Include="Yohuke.DanmuCore.Tests" />
+    </ItemGroup>
+</Project>
