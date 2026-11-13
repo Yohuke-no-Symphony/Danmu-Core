@@ -167,21 +167,21 @@ public partial class BilibiliLiveRoomSearchService : IBilibiliLiveRoomSearchServ
         BilibiliApi api, long uid, TimeSpan? timeout, CancellationToken cancellationToken,
         IReadOnlyCollection<string> sensitiveValues)
     {
-        var response = await api.GetUserCardAsync(uid, timeout, cancellationToken);
+        var response = await api.GetUserLiveRoomAsync(uid, timeout, cancellationToken);
 
         if (response.Code != 0)
         {
             return ResponseIssue(LiveRoomSearchSource.UserId, response, sensitiveValues);
         }
-
-        if (response.Data is not { Uid: > 0 } user)
+        if (response.Data is { RoomId: > 0 } room)
         {
-            return IssuePage(LiveRoomSearchSource.UserId, error: new(CoreErrorCode.RoomSearchResultsMissing));
+            return await GetRoomAsync(api, room.RoomId, LiveRoomSearchSource.UserId, timeout, cancellationToken, sensitiveValues);
         }
-
-        return user.LiveRoom is { RoomId: > 0 } room
-            ? await GetRoomAsync(api, room.RoomId, LiveRoomSearchSource.UserId, timeout, cancellationToken, sensitiveValues)
-            : new();
+        if (response.Data is { RoomId: 0, RoomStatus: 0 })
+        {
+            return new();
+        }
+        return IssuePage(LiveRoomSearchSource.UserId, error: new(CoreErrorCode.RoomSearchResultsMissing));
     }
 
     private static async Task<LiveRoomSearchPage> GetRoomAsync(

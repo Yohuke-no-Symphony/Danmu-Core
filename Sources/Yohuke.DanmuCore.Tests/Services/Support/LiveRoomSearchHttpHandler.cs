@@ -28,6 +28,13 @@ public class LiveRoomSearchHttpHandler : HttpMessageHandler
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
         CancellationToken cancellationToken)
     {
+        if (request.RequestUri!.AbsolutePath == "/x/frontend/finger/spi")
+        {
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""{"code":0,"data":{"b_3":"test-device","b_4":"test-device-v4"}}""")
+            });
+        }
         RequestUri = request.RequestUri;
         Cookie = request.Headers.TryGetValues("Cookie", out var values) ? string.Join("; ", values) : "";
         return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)

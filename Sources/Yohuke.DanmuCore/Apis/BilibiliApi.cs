@@ -65,20 +65,27 @@ public partial class BilibiliApi : BaseApi
     /// <summary>
     /// 获取直播间标题、简介等信息。
     /// </summary>
-    public Task<ApiResponse<BilibiliRoomInfoData>> GetRoomInfoAsync(
+    public async Task<ApiResponse<BilibiliRoomInfoData>> GetRoomInfoAsync(
         long roomId,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default)
     {
-        return GetJsonAsync<ApiResponse<BilibiliRoomInfoData>>(
-            "https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom",
+        using var timeoutTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutTokenSource.CancelAfter(timeout ?? DefaultTimeout);
+        var parameters = await signer.FillAsync(
             new Dictionary<string, object?>
             {
-                ["room_id"] = roomId
+                ["room_id"] = roomId,
+                ["web_location"] = "444.8"
             },
+            timeoutTokenSource.Token);
+
+        return await GetJsonAsync<ApiResponse<BilibiliRoomInfoData>>(
+            "https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom",
+            parameters,
             CreateLiveHeaders(),
             timeout,
-            cancellationToken);
+            timeoutTokenSource.Token);
     }
 
     /// <summary>读取直播间近期普通弹幕。</summary>
@@ -380,7 +387,7 @@ public partial class BilibiliApi : BaseApi
     /// <summary>
     /// 根据关键字搜索直播用户。
     /// </summary>
-    public Task<ApiResponse<BilibiliLiveUserSearchData>> SearchLiveUsersAsync(
+    public async Task<ApiResponse<BilibiliLiveUserSearchData>> SearchLiveUsersAsync(
         string keyword,
         int pageSize = 42,
         string cookie = "",
@@ -388,11 +395,14 @@ public partial class BilibiliApi : BaseApi
         CancellationToken cancellationToken = default,
         int page = 1)
     {
+        using var timeoutTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutTokenSource.CancelAfter(timeout ?? DefaultTimeout);
         var headers = CreateDefaultHeaders();
-        headers["Cookie"] = cookie;
         headers["Origin"] = "https://search.bilibili.com";
+        headers["Referer"] = "https://search.bilibili.com/";
+        headers["Cookie"] = await EnsureSearchDeviceCookieAsync(cookie, headers, timeout, timeoutTokenSource.Token);
 
-        return GetJsonAsync<ApiResponse<BilibiliLiveUserSearchData>>(
+        return await GetJsonAsync<ApiResponse<BilibiliLiveUserSearchData>>(
             "https://api.bilibili.com/x/web-interface/search/type",
             new Dictionary<string, object?>
             {
@@ -403,7 +413,7 @@ public partial class BilibiliApi : BaseApi
             },
             headers,
             timeout,
-            cancellationToken);
+            timeoutTokenSource.Token);
     }
 
     /// <summary>获取当前账号正在直播的关注，接口不提供完整关注名单或分页。</summary>

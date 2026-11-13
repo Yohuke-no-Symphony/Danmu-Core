@@ -27,11 +27,11 @@ public class BilibiliRoomDiscoveryTests
                     return NAV_JSON;
                 }
 
-                if (uri.AbsolutePath.EndsWith("/acc/info"))
+                if (uri.AbsolutePath.EndsWith("/getRoomInfoOld"))
                 {
                     uidStarted.SetResult();
                     await roomStarted.Task.WaitAsync(token);
-                    return """{"code":0,"data":{"mid":42,"name":"主播","live_room":{"roomid":100,"liveStatus":1}}}""";
+                    return """{"code":0,"data":{"roomStatus":1,"roomid":100,"liveStatus":1}}""";
                 }
 
                 if (uri.Query.Contains("room_id=42"))
@@ -55,7 +55,8 @@ public class BilibiliRoomDiscoveryTests
         Assert.Empty(page.Issues);
         Assert.False(page.HasMore);
         Assert.All(handler.Requests, request => Assert.Empty(request.Cookie));
-        Assert.Contains(handler.Requests, request => request.Uri.AbsolutePath.EndsWith("/acc/info") && request.Uri.Query.Contains("w_rid="));
+        Assert.Contains(handler.Requests, request => request.Uri.AbsolutePath.EndsWith("/getRoomInfoOld") && request.Uri.Query.Contains("mid=42"));
+        Assert.Contains(handler.Requests, request => request.Uri.AbsolutePath.EndsWith("/getInfoByRoom") && request.Uri.Query.Contains("w_rid="));
     }
 
     /// <summary>纯数字可能分别命中两个房间，保留两项及各自来源。</summary>
@@ -65,8 +66,8 @@ public class BilibiliRoomDiscoveryTests
         using var handler = new RoomDiscoveryHttpHandler
         {
             RespondAsync = (uri, _) => Task.FromResult(uri.AbsolutePath.EndsWith("/nav") ? NAV_JSON
-                : uri.AbsolutePath.EndsWith("/acc/info")
-                    ? """{"code":0,"data":{"mid":42,"name":"主播","live_room":{"roomid":100}}}"""
+                : uri.AbsolutePath.EndsWith("/getRoomInfoOld")
+                    ? """{"code":0,"data":{"roomStatus":1,"roomid":100}}"""
                     : uri.Query.Contains("room_id=42") ? RoomJson(200, 42) : RoomJson(100, 0))
         };
         using var client = new HttpClient(handler);
@@ -85,7 +86,7 @@ public class BilibiliRoomDiscoveryTests
         using var handler = new RoomDiscoveryHttpHandler
         {
             RespondAsync = (uri, _) => Task.FromResult(uri.AbsolutePath.EndsWith("/nav") ? NAV_JSON
-                : uri.AbsolutePath.EndsWith("/acc/info")
+                : uri.AbsolutePath.EndsWith("/getRoomInfoOld")
                     ? """{"code":-412,"message":"请求被拦截"}""" : RoomJson(100, 42))
         };
         using var client = new HttpClient(handler);
