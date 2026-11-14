@@ -42,5 +42,13 @@ public enum CoreErrorCode
     /// <summary>房间搜索请求失败。</summary>
     RoomSearchFailed,
     /// <summary>浏览器未提供完整的 B 站登录凭据。</summary>
-    BrowserLoginBilibiliCookiesMissing
+    BrowserLoginBilibiliCookiesMissing,
+    /// <summary>获取弹幕连接配置时平台返回业务失败。</summary>
+    WebSocketConfigurationRequestFailed,
+    /// <summary>平台拒绝弹幕连接的入房鉴权。</summary>
+    WebSocketAuthenticationFailed,
+    /// <summary>弹幕连接的入房鉴权回复无效。</summary>
+    WebSocketAuthenticationResponseInvalid,
+    /// <summary>弹幕连接未在期限内完成入房鉴权。</summary>
+    WebSocketAuthenticationTimeout
 }

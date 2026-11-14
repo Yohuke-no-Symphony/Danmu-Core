@@ -65,10 +65,30 @@ public partial class BilibiliApi : BaseApi
     /// <summary>
     /// 获取直播间标题、简介等信息。
     /// </summary>
-    public async Task<ApiResponse<BilibiliRoomInfoData>> GetRoomInfoAsync(
+    public Task<ApiResponse<BilibiliRoomInfoData>> GetRoomInfoAsync(
         long roomId,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default)
+    {
+        return GetRoomInfoCoreAsync(roomId, null, timeout, cancellationToken);
+    }
+
+    /// <summary>使用明确指定的采集凭据查询直播间资料，签名取键仍使用公开身份。</summary>
+    public Task<ApiResponse<BilibiliRoomInfoData>> GetRoomInfoWithCredentialsAsync(
+        long roomId,
+        string cookie,
+        TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(cookie);
+        return GetRoomInfoCoreAsync(roomId, cookie, timeout, cancellationToken);
+    }
+
+    private async Task<ApiResponse<BilibiliRoomInfoData>> GetRoomInfoCoreAsync(
+        long roomId,
+        string? cookie,
+        TimeSpan? timeout,
+        CancellationToken cancellationToken)
     {
         using var timeoutTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutTokenSource.CancelAfter(timeout ?? DefaultTimeout);
@@ -80,10 +100,15 @@ public partial class BilibiliApi : BaseApi
             },
             timeoutTokenSource.Token);
 
+        var headers = CreateLiveHeaders();
+        if (!string.IsNullOrWhiteSpace(cookie))
+        {
+            headers["Cookie"] = ApiCookieHelper.CreateBilibiliCookie(cookie);
+        }
         return await GetJsonAsync<ApiResponse<BilibiliRoomInfoData>>(
             "https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom",
             parameters,
-            CreateLiveHeaders(),
+            headers,
             timeout,
             timeoutTokenSource.Token);
     }

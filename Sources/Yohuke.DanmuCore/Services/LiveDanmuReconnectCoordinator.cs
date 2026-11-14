@@ -10,13 +10,20 @@ internal class LiveDanmuReconnectCoordinator
 
     private readonly Func<Action, CancellationToken, Task> connectOnce;
     private readonly Func<TimeSpan, CancellationToken, Task> delay;
+    private readonly LiveDanmuReconnectMode reconnectMode;
 
     internal LiveDanmuReconnectCoordinator(
         Func<Action, CancellationToken, Task> connectOnce,
-        Func<TimeSpan, CancellationToken, Task>? delay = null)
+        Func<TimeSpan, CancellationToken, Task>? delay = null,
+        LiveDanmuReconnectMode reconnectMode = LiveDanmuReconnectMode.Automatic)
     {
+        if (!Enum.IsDefined(reconnectMode))
+        {
+            throw new ArgumentOutOfRangeException(nameof(reconnectMode));
+        }
         this.connectOnce = connectOnce;
         this.delay = delay ?? Task.Delay;
+        this.reconnectMode = reconnectMode;
     }
 
     internal event EventHandler<Exception>? ErrorReceived;
@@ -64,6 +71,11 @@ internal class LiveDanmuReconnectCoordinator
                 if (cancellationToken.IsCancellationRequested)
                 {
                     break;
+                }
+
+                if (reconnectMode == LiveDanmuReconnectMode.CallerManaged)
+                {
+                    throw;
                 }
 
                 ErrorReceived?.Invoke(this, exception);

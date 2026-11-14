@@ -40,6 +40,10 @@ public class BilibiliLiveWebSocket : BaseApi, ILiveDanmuSocket, IBilibiliRawEven
     private readonly string roomId;
     private readonly BilibiliLoginCookie cookie;
     private readonly BilibiliWbiSigner signer = new();
+    private readonly TimeSpan authenticationTimeout;
+
+    /// <summary>连接失败后的重连责任，默认由共享客户端自动重连。</summary>
+    public LiveDanmuReconnectMode ReconnectMode { get; init; } = LiveDanmuReconnectMode.Automatic;
 
     /// <summary>
     /// 接收到翻译弹幕时触发。
@@ -105,6 +109,7 @@ public class BilibiliLiveWebSocket : BaseApi, ILiveDanmuSocket, IBilibiliRawEven
     {
         this.roomId = roomId;
         this.cookie = cookie;
+        authenticationTimeout = timeout ?? TimeSpan.FromSeconds(5);
     }
 
     /// <summary>
@@ -112,7 +117,7 @@ public class BilibiliLiveWebSocket : BaseApi, ILiveDanmuSocket, IBilibiliRawEven
     /// </summary>
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
-        var reconnectCoordinator = new LiveDanmuReconnectCoordinator(ConnectOnceAsync);
+        var reconnectCoordinator = new LiveDanmuReconnectCoordinator(ConnectOnceAsync, reconnectMode: ReconnectMode);
         reconnectCoordinator.ErrorReceived += (_, exception) =>
         {
             ErrorReceived?.Invoke(this, exception);
@@ -145,8 +150,7 @@ public class BilibiliLiveWebSocket : BaseApi, ILiveDanmuSocket, IBilibiliRawEven
     private async Task ConnectOnceAsync(Action onConnected, CancellationToken cancellationToken)
     {
         var danmuInfo = await GetDanmuInfoAsync(cancellationToken);
-        var data = danmuInfo.Data ?? throw CoreExceptionInfo.Create(CoreErrorCode.WebSocketServerDataMissing,
-            message => new InvalidOperationException(message));
+        var data = RequireDanmuConfiguration(danmuInfo);
         var host = data.HostList.FirstOrDefault() ?? throw CoreExceptionInfo.Create(CoreErrorCode.WebSocketServerMissing,
             message => new InvalidOperationException(message));
         var uri = CreateWebSocketUri(host);
@@ -162,18 +166,28 @@ public class BilibiliLiveWebSocket : BaseApi, ILiveDanmuSocket, IBilibiliRawEven
         var enterRoomPacket = CreateEnterRoomPacket(data.Token);
         await websocket.SendAsync(enterRoomPacket, WebSocketMessageType.Binary, true, connectionToken);
         var lastPacketTimestamp = Stopwatch.GetTimestamp();
+        var authenticated = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var receiveTask = ReceiveLoopAsync(
             websocket,
             () => Interlocked.Exchange(ref lastPacketTimestamp, Stopwatch.GetTimestamp()),
+            () => authenticated.TrySetResult(),
             connectionToken);
         var heartbeatTask = SendHeartbeatAsync(websocket, connectionToken);
         var monitorTask = MonitorConnectionAsync(
             () => Interlocked.Read(ref lastPacketTimestamp),
             connectionToken);
-        onConnected();
+        var authenticationTask = WaitForAuthenticationAsync(authenticated.Task, authenticationTimeout, connectionToken);
 
         try
         {
+            var authenticationResult = await Task.WhenAny(authenticationTask, receiveTask, heartbeatTask, monitorTask);
+            await authenticationResult;
+            if (!authenticated.Task.IsCompletedSuccessfully)
+            {
+                throw CoreExceptionInfo.Create(CoreErrorCode.WebSocketConnectionClosed,
+                    message => new WebSocketException(message));
+            }
+            onConnected();
             var completedTask = await Task.WhenAny(receiveTask, heartbeatTask, monitorTask);
             await completedTask;
 
@@ -187,7 +201,33 @@ public class BilibiliLiveWebSocket : BaseApi, ILiveDanmuSocket, IBilibiliRawEven
         {
             connectionTokenSource.Cancel();
             websocket.Abort();
-            await IgnoreConnectionTaskErrorsAsync(receiveTask, heartbeatTask, monitorTask);
+            await IgnoreConnectionTaskErrorsAsync(receiveTask, heartbeatTask, monitorTask, authenticationTask);
+        }
+    }
+
+    internal static BilibiliDanmuInfoData RequireDanmuConfiguration(ApiResponse<BilibiliDanmuInfoData> response)
+    {
+        if (response.Code != 0)
+        {
+            throw response.Code == -101
+                ? CoreExceptionInfo.Create(CoreErrorCode.WebSocketConfigurationRequestFailed,
+                    message => new BilibiliAuthenticationException(message), response.Code)
+                : CoreExceptionInfo.Create(CoreErrorCode.WebSocketConfigurationRequestFailed,
+                    message => new InvalidOperationException(message), response.Code);
+        }
+        return response.Data ?? throw CoreExceptionInfo.Create(CoreErrorCode.WebSocketServerDataMissing,
+            message => new InvalidOperationException(message));
+    }
+
+    internal static async Task WaitForAuthenticationAsync(Task authenticated, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await authenticated.WaitAsync(timeout, cancellationToken);
+        }
+        catch (TimeoutException exception)
+        {
+            throw CoreExceptionInfo.Attach(exception, new(CoreErrorCode.WebSocketAuthenticationTimeout));
         }
     }
 
@@ -209,6 +249,7 @@ public class BilibiliLiveWebSocket : BaseApi, ILiveDanmuSocket, IBilibiliRawEven
     private async Task ReceiveLoopAsync(
         ClientWebSocket websocket,
         Action onPacketReceived,
+        Action onAuthenticated,
         CancellationToken cancellationToken)
     {
         while (websocket.State == WebSocketState.Open && !cancellationToken.IsCancellationRequested)
@@ -222,7 +263,7 @@ public class BilibiliLiveWebSocket : BaseApi, ILiveDanmuSocket, IBilibiliRawEven
             }
 
             onPacketReceived();
-            AnalysePackage(packet);
+            AnalysePackage(packet, onAuthenticated);
         }
 
         if (!cancellationToken.IsCancellationRequested)
@@ -284,12 +325,12 @@ public class BilibiliLiveWebSocket : BaseApi, ILiveDanmuSocket, IBilibiliRawEven
         }
     }
 
-    internal void AnalysePackage(byte[] rawData)
+    internal void AnalysePackage(byte[] rawData, Action? onAuthenticated = null)
     {
-        AnalysePackages(rawData, 0);
+        AnalysePackages(rawData, 0, onAuthenticated);
     }
 
-    private void AnalysePackages(ReadOnlySpan<byte> rawData, int nesting)
+    private void AnalysePackages(ReadOnlySpan<byte> rawData, int nesting, Action? onAuthenticated)
     {
         if (nesting > MAX_PACKET_NESTING)
         {
@@ -319,6 +360,12 @@ public class BilibiliLiveWebSocket : BaseApi, ILiveDanmuSocket, IBilibiliRawEven
             var operation = BinaryPrimitives.ReadInt32BigEndian(remaining.Slice(8, 4));
             var body = remaining.Slice(headerLength, packageLength - headerLength);
             offset += packageLength;
+            if (operation == 8)
+            {
+                RequireAuthentication(body);
+                onAuthenticated?.Invoke();
+                continue;
+            }
             if (operation != 5)
             {
                 continue;
@@ -334,7 +381,7 @@ public class BilibiliLiveWebSocket : BaseApi, ILiveDanmuSocket, IBilibiliRawEven
                         break;
                     case 2:
                     case 3:
-                        AnalysePackages(DecompressPacket(body, version), nesting + 1);
+                        AnalysePackages(DecompressPacket(body, version), nesting + 1, onAuthenticated);
                         break;
                     default:
                         throw new InvalidDataException("Packet compression version is unsupported.");
@@ -344,6 +391,33 @@ public class BilibiliLiveWebSocket : BaseApi, ILiveDanmuSocket, IBilibiliRawEven
             {
                 ReportProtocolError("packet", error);
             }
+        }
+    }
+
+    private static void RequireAuthentication(ReadOnlySpan<byte> body)
+    {
+        JToken? code;
+        try
+        {
+            code = JObject.Parse(Encoding.UTF8.GetString(body))["code"];
+        }
+        catch (JsonException exception)
+        {
+            throw CoreExceptionInfo.Create(CoreErrorCode.WebSocketAuthenticationResponseInvalid,
+                message => new InvalidOperationException(message, exception));
+        }
+        if (code?.Type != JTokenType.Integer || !int.TryParse(code.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var value))
+        {
+            throw CoreExceptionInfo.Create(CoreErrorCode.WebSocketAuthenticationResponseInvalid,
+                message => new InvalidOperationException(message));
+        }
+        if (value != 0)
+        {
+            throw value == -101
+                ? CoreExceptionInfo.Create(CoreErrorCode.WebSocketAuthenticationFailed,
+                    message => new BilibiliAuthenticationException(message), value)
+                : CoreExceptionInfo.Create(CoreErrorCode.WebSocketAuthenticationFailed,
+                    message => new InvalidOperationException(message), value);
         }
     }
 

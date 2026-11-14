@@ -50,11 +50,52 @@ public sealed class BilibiliRoomInfoApiTests
         Assert.Equal(2, requests);
     }
 
+    /// <summary>显式身份仅用于房间请求，轮换身份不影响签名取键和原有公开查询。</summary>
+    [Fact]
+    public async Task ExplicitRoomCredentialsAreNormalizedWithoutChangingAnonymousQueries()
+    {
+        var roomCookies = new List<string?>();
+        var navigationRequests = 0;
+        using var handler = new ApiTestHttpHandler((request, _) =>
+        {
+            if (request.RequestUri!.AbsolutePath == NAV_PATH)
+            {
+                navigationRequests++;
+                Assert.False(request.Headers.Contains("Cookie"));
+                return Task.FromResult(Json(NAV_JSON));
+            }
+            Assert.Equal(ROOM_PATH, request.RequestUri.AbsolutePath);
+            roomCookies.Add(request.Headers.TryGetValues("Cookie", out var values) ? Assert.Single(values) : null);
+            var query = HttpUtility.ParseQueryString(request.RequestUri.Query);
+            Assert.Equal("21573665", query["room_id"]);
+            Assert.NotEmpty(query["w_rid"]!);
+            return Task.FromResult(Json("""{"code":0,"data":{"room_info":{"room_id":21573665}}}"""));
+        });
+        using var http = new HttpClient(handler);
+        using var api = new BilibiliApi("SESSDATA=client-session", httpClient: http);
+
+        var selected = await api.GetRoomInfoWithCredentialsAsync(21573665,
+            " DedeUserID = 42 ; SESSDATA = selected-session ; buvid3 = selected-device ; bili_jct = selected-csrf ; ignored = omitted ");
+        await api.GetRoomInfoWithCredentialsAsync(21573665, "SESSDATA=replacement-session;DedeUserID=43");
+        await api.GetRoomInfoAsync(21573665);
+
+        Assert.Equal(21573665, selected.Data!.RoomInfo!.RoomId);
+        Assert.Equal(1, navigationRequests);
+        Assert.Equal(new string?[]
+        {
+            "buvid3=selected-device;SESSDATA=selected-session;bili_jct=selected-csrf;DedeUserId=42",
+            "buvid3=;SESSDATA=replacement-session;bili_jct=;DedeUserId=43",
+            null
+        }, roomCookies);
+    }
+
     /// <summary>调用方设置的超时同时约束签名取键和资料请求。</summary>
     [Theory]
-    [InlineData(NAV_PATH)]
-    [InlineData(ROOM_PATH)]
-    public async Task RoomInfoTimeoutCoversKeyAcquisitionAndRoomRequest(string delayedPath)
+    [InlineData(NAV_PATH, false)]
+    [InlineData(ROOM_PATH, false)]
+    [InlineData(NAV_PATH, true)]
+    [InlineData(ROOM_PATH, true)]
+    public async Task RoomInfoTimeoutCoversKeyAcquisitionAndRoomRequest(string delayedPath, bool explicitCredentials)
     {
         using var handler = new ApiTestHttpHandler(async (request, token) =>
         {
@@ -68,15 +109,19 @@ public sealed class BilibiliRoomInfoApiTests
         using var http = new HttpClient(handler);
         using var api = new BilibiliApi(httpClient: http);
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => api.GetRoomInfoAsync(21573665,
-            timeout: TimeSpan.FromMilliseconds(100)).WaitAsync(TimeSpan.FromSeconds(2)));
+        var request = explicitCredentials
+            ? api.GetRoomInfoWithCredentialsAsync(21573665, "SESSDATA=selected-session", timeout: TimeSpan.FromMilliseconds(100))
+            : api.GetRoomInfoAsync(21573665, timeout: TimeSpan.FromMilliseconds(100));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => request.WaitAsync(TimeSpan.FromSeconds(2)));
     }
 
     /// <summary>取消资料查询时终止当前取键或资料请求，不返回伪造的成功资料。</summary>
     [Theory]
-    [InlineData(NAV_PATH)]
-    [InlineData(ROOM_PATH)]
-    public async Task RoomInfoCancellationStopsKeyAcquisitionAndRoomRequest(string cancelledPath)
+    [InlineData(NAV_PATH, false)]
+    [InlineData(ROOM_PATH, false)]
+    [InlineData(NAV_PATH, true)]
+    [InlineData(ROOM_PATH, true)]
+    public async Task RoomInfoCancellationStopsKeyAcquisitionAndRoomRequest(string cancelledPath, bool explicitCredentials)
     {
         using var cancellation = new CancellationTokenSource();
         using var handler = new ApiTestHttpHandler(async (request, token) =>
@@ -92,8 +137,10 @@ public sealed class BilibiliRoomInfoApiTests
         using var http = new HttpClient(handler);
         using var api = new BilibiliApi(httpClient: http);
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => api.GetRoomInfoAsync(21573665,
-            cancellationToken: cancellation.Token));
+        var request = explicitCredentials
+            ? api.GetRoomInfoWithCredentialsAsync(21573665, "SESSDATA=selected-session", cancellationToken: cancellation.Token)
+            : api.GetRoomInfoAsync(21573665, cancellationToken: cancellation.Token);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => request);
     }
 
     /// <summary>补齐签名后仍保留上游的业务拒绝，交由调用方处理。</summary>

@@ -47,6 +47,10 @@ public sealed record CoreErrorInfo
                 CoreErrorCode.RoomSearchResultsMissing => "The room search response is incomplete.",
                 CoreErrorCode.RoomSearchFailed => "The room search request failed.",
                 CoreErrorCode.BrowserLoginBilibiliCookiesMissing => "The Bilibili login cookies are incomplete.",
+                CoreErrorCode.WebSocketConfigurationRequestFailed => "The danmu connection configuration request failed.",
+                CoreErrorCode.WebSocketAuthenticationFailed => "The danmu connection authentication was rejected.",
+                CoreErrorCode.WebSocketAuthenticationResponseInvalid => "The danmu connection authentication response is invalid.",
+                CoreErrorCode.WebSocketAuthenticationTimeout => "The danmu connection authentication timed out.",
                 _ => "A shared danmu operation failed."
             };
             return Arguments.Count == 0
